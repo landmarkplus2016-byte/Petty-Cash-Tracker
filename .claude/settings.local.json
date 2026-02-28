@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(powershell -Command:*)",
+      "Bash(powershell -ExecutionPolicy Bypass -File:*)",
+      "Bash(powershell -ExecutionPolicy Bypass -Command:*)",
+      "Read(//c/Users/win10/.claude/projects/c--Users-win10-Dropbox-Claude-Projects-Visual-Studio-Acquisition-Depertment-Petty-Cash/memory/**)"
+    ]
+  }
+}
