@@ -776,3 +776,118 @@ document.addEventListener('DOMContentLoaded', () => {
 
   renderDashboard();
 });
+
+/* ================================================================
+   VOICE RECOGNITION (Arabic)
+   ================================================================ */
+
+let voiceRecognition = null;
+
+function startVoice(target) {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    toast('المتصفح لا يدعم التعرف على الصوت. استخدم Chrome أو Edge.', 'warning');
+    return;
+  }
+
+  // Stop any existing session
+  if (voiceRecognition) {
+    voiceRecognition.stop();
+    voiceRecognition = null;
+  }
+
+  const micBtn = document.getElementById(target === 'details' ? 'micDetails' : 'micAmount');
+
+  voiceRecognition = new SpeechRecognition();
+  voiceRecognition.lang = 'ar-SA';
+  voiceRecognition.interimResults = false;
+  voiceRecognition.maxAlternatives = 1;
+
+  // Visual feedback — button pulses red while listening
+  micBtn.classList.add('btn-danger');
+  micBtn.classList.remove('btn-outline-secondary');
+  micBtn.innerHTML = '<i class="bi bi-mic-fill"></i> <span style="font-size:11px">جارٍ الاستماع...</span>';
+
+  voiceRecognition.onresult = function(event) {
+    const transcript = event.results[0][0].transcript.trim();
+
+    if (target === 'details') {
+      const current = document.getElementById('eDetails').value;
+      document.getElementById('eDetails').value = current ? current + ' ' + transcript : transcript;
+
+    } else if (target === 'amount') {
+      const num = parseArabicNumber(transcript);
+      if (num !== null) {
+        document.getElementById('eAmount').value = num;
+      } else {
+        toast('لم يتم التعرف على المبلغ. حاول مجدداً: مثال "مية وخمسين"', 'warning');
+      }
+    }
+    resetMicBtn(micBtn);
+  };
+
+  voiceRecognition.onerror = function(event) {
+    if (event.error !== 'no-speech') {
+      toast('خطأ في التعرف على الصوت: ' + event.error, 'warning');
+    }
+    resetMicBtn(micBtn);
+  };
+
+  voiceRecognition.onend = function() {
+    resetMicBtn(micBtn);
+  };
+
+  voiceRecognition.start();
+}
+
+function resetMicBtn(btn) {
+  btn.classList.remove('btn-danger');
+  btn.classList.add('btn-outline-secondary');
+  btn.innerHTML = '<i class="bi bi-mic-fill"></i>';
+  voiceRecognition = null;
+}
+
+// Converts spoken Arabic numbers to a numeric value
+function parseArabicNumber(text) {
+  const map = {
+    'صفر': 0, 'واحد': 1, 'واحدة': 1, 'اثنين': 2, 'اثنان': 2, 'ثلاثة': 3, 'ثلاث': 3,
+    'أربعة': 4, 'أربع': 4, 'خمسة': 5, 'خمس': 5, 'ستة': 6, 'ست': 6,
+    'سبعة': 7, 'سبع': 7, 'ثمانية': 8, 'ثماني': 8, 'تسعة': 9, 'تسع': 9,
+    'عشرة': 10, 'عشر': 10, 'عشرين': 20, 'ثلاثين': 30, 'أربعين': 40,
+    'خمسين': 50, 'ستين': 60, 'سبعين': 70, 'ثمانين': 80, 'تسعين': 90,
+    'مية': 100, 'مئة': 100, 'مائة': 100, 'مئتين': 200, 'ميتين': 200,
+    'ثلاثمية': 300, 'ثلاثمئة': 300, 'أربعمية': 400, 'أربعمئة': 400,
+    'خمسمية': 500, 'خمسمئة': 500, 'ستمية': 600, 'ستمئة': 600,
+    'سبعمية': 700, 'سبعمئة': 700, 'ثمانمية': 800, 'ثمانمئة': 800,
+    'تسعمية': 900, 'تسعمئة': 900, 'ألف': 1000, 'الف': 1000,
+    'و': 0  // "and" connector — skip
+  };
+
+  // Try parsing as plain digits first (e.g., user says "150")
+  const directNum = parseFloat(text.replace(/[٠-٩]/g, d => d.charCodeAt(0) - 1632));
+  if (!isNaN(directNum) && directNum > 0) return directNum;
+
+  // Parse word-by-word
+  const words = text.replace(/[،,\.]/g, '').split(/\s+/);
+  let total = 0;
+  let current = 0;
+
+  for (const word of words) {
+    const val = map[word];
+    if (val === undefined) continue; // unknown word — skip
+    if (val === 0 && word === 'و') continue; // skip "and"
+
+    if (val === 1000) {
+      current = current === 0 ? 1 : current;
+      total += current * 1000;
+      current = 0;
+    } else if (val >= 100) {
+      current += val;
+    } else {
+      current += val;
+    }
+  }
+  total += current;
+
+  return total > 0 ? total : null;
+}
