@@ -4,20 +4,25 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-**LMP PettyCash Tracker** — a single-file Arabic RTL web app for petty cash tracking. No build step, no server, no dependencies to install. Open `LMP PettyCash Tracker Ver 1.html` directly in any browser.
+**LMP PettyCash Tracker** — an Arabic RTL Progressive Web App (PWA) for petty cash tracking. No build step, no server, no dependencies to install. Open `index.html` directly in any browser, or install as a PWA on mobile.
 
 ## File Structure
 
 | File | Purpose |
 |---|---|
-| `LMP PettyCash Tracker Ver 1.html` | The entire app — HTML, CSS, JS, and base64 logo all inline |
-| `LMP Big Logo.jpg` | Source logo (already embedded as base64 inside the HTML) |
+| `index.html` | App shell — HTML structure and all page markup |
+| `app.js` | All JavaScript logic — data, rendering, export, voice |
+| `styles.css` | All CSS styles |
+| `sw.js` | Service worker — caches assets for offline/PWA use |
+| `manifest.json` | PWA manifest (name, icons, theme color) |
+| `cashflow.png` | PWA icon |
+| `LMP Big Logo.jpg` | Source logo (embedded as base64 inside `app.js`) |
 | `Report.pdf` | Reference report format the app output must match |
 | `Banner-2.jpg` / `New banner-*.png` | Reference design images used to guide banner styling |
 
 ## Architecture
 
-The app is a **vanilla JS single-page application** inside one HTML file. There is no framework, no module bundler, and no backend.
+The app is a **vanilla JS single-page application** split across `index.html` + `app.js` + `styles.css`. There is no framework, no module bundler, and no backend.
 
 ### CDN Libraries (loaded from jsDelivr/Google)
 - **Bootstrap 5 RTL** — layout and components
@@ -46,13 +51,13 @@ DB = {
 Pages are `<div class="page">` elements toggled with `.active`. Navigate with `goPage(name)` where name is one of: `dashboard`, `add`, `records`, `report`, `analytics`, `settings`. Each page has a corresponding render function called inside `goPage()`.
 
 ### Logo Embedding
-The logo is stored as `const LOGO_SRC = 'data:image/jpeg;base64,...'` (≈39 KB) near the top of the `<script>` block. On `DOMContentLoaded`, it is injected into `['subBannerLogo', 'settingsLogo']` img elements. In the JS-generated report HTML it is referenced as `${LOGO_SRC}` inside a template literal.
+The logo is stored as `const LOGO_SRC = 'data:image/jpeg;base64,...'` (≈39 KB) near the top of `app.js`. On `DOMContentLoaded`, it is injected into `['settingsLogo']` img elements. In the JS-generated report HTML it is referenced as `${LOGO_SRC}` inside a template literal.
 
 To re-embed the logo after changing `LMP Big Logo.jpg`:
 ```powershell
 [Convert]::ToBase64String([IO.File]::ReadAllBytes('LMP Big Logo.jpg')) | Out-File logo_b64.txt -NoNewline -Encoding ASCII
 ```
-Then replace the base64 string inside `const LOGO_SRC = 'data:image/jpeg;base64,...'`.
+Then replace the base64 string inside `const LOGO_SRC = 'data:image/jpeg;base64,...'` in `app.js`.
 
 ### Sticky Header Layout
 Both the banner and blue ribbon are wrapped in `<div id="sticky-top">` with `position: sticky; top: 0`. They freeze together on scroll. Neither child has its own sticky/fixed positioning.
@@ -71,7 +76,7 @@ Two `<link>` tags in `<head>` embed a gold-coin SVG as base64 data URI:
 To update: generate new SVG, base64-encode it in PowerShell (`[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($svg))`), replace both hrefs.
 
 ### Details Field
-The التفاصيل input is a `<textarea rows="3">` (not `<input>`). Supports Enter for new lines.
+The التفاصيل input is a `<textarea rows="3">` (not `<input>`), wrapped in a Bootstrap `input-group` with a mic button. Supports Enter for new lines.
 - `.entry-title` CSS has `white-space:pre-line; word-break:break-word; overflow-wrap:break-word;` so multi-line/long text renders correctly in the records list.
 - `.rt .detail-td` has the same word-break rules plus `white-space:pre-wrap` for the report table.
 
@@ -80,6 +85,22 @@ The التفاصيل input is a `<textarea rows="3">` (not `<input>`). Supports 
 
 ### Report Header Layout
 The report header uses `direction: ltr` on the outer flex container to force **logo LEFT / account info RIGHT**, which is the reverse of the page's RTL default. The inner info div re-applies `direction: rtl` for correct Arabic text rendering.
+
+### Arabic Voice Recognition
+Added to the Add Entry form (`page-add`). Uses the browser's built-in **Web Speech API** — no library needed.
+
+- **`startVoice(target)`** — takes `'details'` or `'amount'`. Sets `lang: 'ar-SA'`, shows red pulsing state on the mic button while listening, then routes the transcript to the correct field.
+- **`resetMicBtn(btn)`** — restores the button to its default outline state after recognition ends (success, error, or silence).
+- **`parseArabicNumber(text)`** — converts spoken Arabic to a number. Tries Eastern Arabic digits (٠-٩) first, then parses words like "مية وخمسين" → `150`. Returns `null` if unrecognized.
+
+**Browser support:** Chrome/Edge = full. Safari = partial (needs HTTPS). Firefox = not supported (shows Arabic warning toast).
+
+**UI pattern:** Both `#eDetails` (textarea) and `#eAmount` (number input) are wrapped in Bootstrap `input-group` divs. The mic button appends to the end of the group; in RTL layout this renders visually to the left of the field.
+
+### PWA / Service Worker
+`sw.js` caches `index.html`, `app.js`, `styles.css`, `cashflow.png`, and `manifest.json` for offline use.
+
+**Critical — cache busting:** The `CACHE` constant in `sw.js` (e.g. `lmp-petty-cash-v1.10`) **must be incremented every time any file changes** before pushing to GitHub. The `activate` handler deletes all caches that don't match the current name, so bumping the version forces phones to download fresh files. Version sequence: `v1` → `v1.10` → `v1.11` → `v1.12` → ...
 
 ## Windows / PowerShell Environment
 
@@ -95,9 +116,10 @@ The report header uses `direction: ltr` on the outer flex container to force **l
 
 ## Key Design Constraints
 
-- **Single file**: Everything must remain inline — no external `.js`, `.css`, or image files.
-- **Offline capable**: All assets either CDN-loaded (first visit) or base64-embedded.
+- **Multi-file but no build step**: `index.html`, `app.js`, `styles.css` are separate files — do not merge them back into one file.
+- **Offline capable**: Service worker caches all local assets. CDN libraries load on first visit and are cached by the browser.
 - **RTL throughout**: `dir="rtl"` on `<html>`. Bootstrap RTL CDN is used (not standard Bootstrap).
 - **Arabic number-to-words**: `toArabicWords()` — unit comes **before** ten in Arabic grammar (أربعة وأربعون, not أربعون وأربعة).
 - **Currency**: All amounts in EGP (ج.م), formatted with `fmt()` → `toLocaleString('en-US', {minimumFractionDigits:2})`.
 - **Desktop**: Capped at `max-width: 480px; margin: 0 auto` on screens ≥ 600px.
+- **Cache bump required**: Always increment `CACHE` in `sw.js` with every change (see PWA section above).
