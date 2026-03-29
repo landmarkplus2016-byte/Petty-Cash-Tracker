@@ -140,6 +140,26 @@
       <input type="date" class="form-control" id="eDate">
     </div>
 
+    <!-- Site ID -->
+    <div class="mb-3">
+      <label class="form-label fw-semibold small">رقم الموقع</label>
+      <input type="text" class="form-control" id="eSiteId" placeholder="أدخل رقم الموقع...">
+    </div>
+
+    <!-- Category -->
+    <div class="mb-3">
+      <label class="form-label fw-semibold small">الفئة</label>
+      <select class="form-select" id="eCategory">
+        <option value="">-- اختر الفئة --</option>
+        <option value="أنتقالات">أنتقالات</option>
+        <option value="إكراميات">إكراميات</option>
+        <option value="نقل">نقل</option>
+        <option value="عماله">عماله</option>
+        <option value="إقامة">إقامة</option>
+        <option value="أخري">أخري</option>
+      </select>
+    </div>
+
     <!-- Details -->
     <div class="mb-3">
       <label class="form-label fw-semibold small">التفاصيل</label>
@@ -230,61 +250,6 @@
 </div>
 
 <!-- =============================================================== -->
-<!-- PAGE: ANALYTICS                                                  -->
-<!-- =============================================================== -->
-<div id="page-analytics" class="page">
-  <div class="pt-3 px-3">
-
-    <!-- Stat grid -->
-    <div class="row g-2 mb-3">
-      <div class="col-6">
-        <div class="stat-card">
-          <div class="sc-label">الرصيد الحالي</div>
-          <p class="sc-value" id="an-balance">0.00</p>
-        </div>
-      </div>
-      <div class="col-6">
-        <div class="stat-card">
-          <div class="sc-label">عدد العمليات</div>
-          <p class="sc-value text-primary" id="an-count">0</p>
-        </div>
-      </div>
-      <div class="col-6">
-        <div class="stat-card">
-          <div class="sc-label">إجمالي العهدة</div>
-          <p class="sc-value text-danger" id="an-custody">0.00</p>
-        </div>
-      </div>
-      <div class="col-6">
-        <div class="stat-card">
-          <div class="sc-label">إجمالي التسوية</div>
-          <p class="sc-value text-success" id="an-settlement">0.00</p>
-        </div>
-      </div>
-    </div>
-
-  </div>
-
-  <!-- Balance trend -->
-  <div class="chart-box">
-    <h6>تطور الرصيد</h6>
-    <canvas id="chartBalance" height="160"></canvas>
-  </div>
-
-  <!-- Monthly bar chart -->
-  <div class="chart-box">
-    <h6>العمليات الشهرية</h6>
-    <canvas id="chartMonthly" height="180"></canvas>
-  </div>
-
-  <!-- Custody vs Settlement pie -->
-  <div class="chart-box" style="margin-bottom:20px">
-    <h6>نسبة العهدة والتسوية</h6>
-    <canvas id="chartPie" height="180"></canvas>
-  </div>
-</div>
-
-<!-- =============================================================== -->
 <!-- PAGE: SETTINGS                                                   -->
 <!-- =============================================================== -->
 <div id="page-settings" class="page">
@@ -357,9 +322,6 @@
   </button>
   <button class="bnav-item" id="nav-report" onclick="goPage('report')">
     <i class="bi bi-file-earmark-text-fill"></i><span>التقرير</span>
-  </button>
-  <button class="bnav-item" id="nav-analytics" onclick="goPage('analytics')">
-    <i class="bi bi-bar-chart-fill"></i><span>تحليلات</span>
   </button>
   <button class="bnav-item" id="nav-settings" onclick="goPage('settings')">
     <i class="bi bi-gear-fill"></i><span>إعدادات</span>

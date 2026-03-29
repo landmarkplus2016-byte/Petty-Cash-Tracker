@@ -60,7 +60,6 @@ function goPage(name) {
   currentPage = name;
   if (name === 'dashboard') renderDashboard();
   if (name === 'records') renderRecords();
-  if (name === 'analytics') renderAnalytics();
   if (name === 'settings') loadSettingsForm();
   if (name === 'add') resetAddForm();
 }
@@ -74,19 +73,24 @@ function openAddForm(type) {
    ENTRY CRUD
    ================================================================ */
 function saveEntry() {
-  const date    = document.getElementById('eDate').value;
-  const details = document.getElementById('eDetails').value.trim();
-  const amt     = parseFloat(document.getElementById('eAmount').value);
-  const type    = document.querySelector('input[name="eType"]:checked').value;
-  const editId  = document.getElementById('editId').value;
+  const date     = document.getElementById('eDate').value;
+  const details  = document.getElementById('eDetails').value.trim();
+  const amt      = parseFloat(document.getElementById('eAmount').value);
+  const type     = document.querySelector('input[name="eType"]:checked').value;
+  const editId   = document.getElementById('editId').value;
+  const siteId   = document.getElementById('eSiteId').value.trim();
+  const category = document.getElementById('eCategory').value;
 
   if (!date)           return toast('يرجى تحديد التاريخ', 'warning');
   if (!details)        return toast('يرجى إدخال التفاصيل', 'warning');
+  if (!category)       return toast('يرجى اختيار الفئة', 'warning');
   if (!amt || amt <= 0) return toast('يرجى إدخال مبلغ صحيح', 'warning');
 
   const entry = {
     date,
     details,
+    siteId,
+    category,
     custody:    type === 'custody'    ? parseFloat(amt.toFixed(2)) : 0,
     settlement: type === 'settlement' ? parseFloat(amt.toFixed(2)) : 0,
     _balance: 0
@@ -115,6 +119,8 @@ function editEntry(id) {
   document.getElementById('addFormTitle').textContent = 'تعديل القيد';
   document.getElementById('eDate').value = e.date;
   document.getElementById('eDetails').value = e.details;
+  document.getElementById('eSiteId').value = e.siteId || '';
+  document.getElementById('eCategory').value = e.category || '';
   if (e.custody > 0) {
     document.getElementById('tCustody').checked = true;
     document.getElementById('eAmount').value = e.custody;
@@ -143,6 +149,8 @@ function resetAddForm() {
   document.getElementById('addFormTitle').textContent = 'إضافة قيد جديد';
   document.getElementById('eDate').value = todayISO();
   document.getElementById('eDetails').value = '';
+  document.getElementById('eSiteId').value = '';
+  document.getElementById('eCategory').value = '';
   document.getElementById('eAmount').value = '';
   document.getElementById('tCustody').checked = true;
 }
@@ -199,7 +207,8 @@ function renderRecords() {
   const q = (document.getElementById('searchQ')?.value || '').toLowerCase();
   const sorted = computedEntries().reverse();
   const filtered = q ? sorted.filter(e =>
-    e.details.toLowerCase().includes(q) || e.date.includes(q)
+    e.details.toLowerCase().includes(q) || e.date.includes(q) ||
+    (e.siteId || '').toLowerCase().includes(q) || (e.category || '').toLowerCase().includes(q)
   ) : sorted;
 
   const el = document.getElementById('recordsList');
@@ -226,7 +235,7 @@ function entryHTML(e, showActions) {
       <div class="d-flex justify-content-between align-items-start">
         <div style="flex:1;min-width:0">
           <div class="entry-title">${e.details}</div>
-          <div class="entry-date">${fmtDate(e.date)}</div>
+          <div class="entry-date">${fmtDate(e.date)}${e.category ? ' &nbsp;|&nbsp; ' + e.category : ''}${e.siteId ? ' &nbsp;|&nbsp; ' + e.siteId : ''}</div>
           ${actions}
         </div>
         <div class="text-end ms-2">
@@ -252,22 +261,68 @@ function buildReport() {
 
   if (!rows.length) { toast('لا توجد بيانات في هذا النطاق', 'warning'); return; }
 
-  reportEntries = rows;
+  reportEntries = rows; // kept as individual entries for Excel
   const tc = rows.reduce((s,e) => s + e.custody, 0);
   const ts = rows.reduce((s,e) => s + e.settlement, 0);
   const finalBal = rows[rows.length - 1]._balance;
   const inf = DB.account;
   const today = new Date().toLocaleDateString('ar-EG');
 
-  const rowsHTML = rows.map((e, i) => `
+  // --- Group entries by siteId for the PDF/HTML report ---
+  const siteMap = {};
+  const siteOrder = [];
+  const noSiteRows = [];
+
+  rows.forEach(e => {
+    if (e.siteId) {
+      if (!siteMap[e.siteId]) {
+        siteMap[e.siteId] = { siteId: e.siteId, custody: 0, settlement: 0, minDate: e.date, maxDate: e.date };
+        siteOrder.push(e.siteId);
+      }
+      const g = siteMap[e.siteId];
+      g.custody    += e.custody;
+      g.settlement += e.settlement;
+      if (e.date < g.minDate) g.minDate = e.date;
+      if (e.date > g.maxDate) g.maxDate = e.date;
+    } else {
+      noSiteRows.push(e);
+    }
+  });
+
+  // Grouped site rows first, then individual entries with no site
+  const displayRows = [
+    ...siteOrder.map(sid => ({ type: 'group', ...siteMap[sid] })),
+    ...noSiteRows.map(e  => ({ type: 'single', ...e }))
+  ];
+
+  const rowsHTML = displayRows.map((r, i) => {
+    if (r.type === 'group') {
+      const net      = parseFloat((r.custody - r.settlement).toFixed(2));
+      const netColor = net > 0 ? 'var(--danger)' : 'var(--success)';
+      const dateStr  = r.minDate === r.maxDate
+        ? fmtDate(r.minDate)
+        : fmtDate(r.minDate) + ' – ' + fmtDate(r.maxDate);
+      return `
     <tr>
       <td>${i + 1}</td>
-      <td>${fmtDate(e.date)}</td>
-      <td class="detail-td">${e.details}</td>
-      <td style="color:${e.custody > 0 ? 'var(--danger)' : '#888'}">${e.custody > 0 ? fmt(e.custody) : '.00'}</td>
-      <td style="color:${e.settlement > 0 ? 'var(--success)' : '#888'}">${e.settlement > 0 ? fmt(e.settlement) : '.00'}</td>
-      <td style="color:${e._balance >= 0 ? 'var(--success)' : 'var(--danger)'}; font-weight:600">${fmt(e._balance)}</td>
-    </tr>`).join('');
+      <td>${dateStr}</td>
+      <td><strong>${r.siteId}</strong></td>
+      <td style="color:${r.custody > 0 ? 'var(--danger)' : '#888'}">${r.custody > 0 ? fmt(r.custody) : '.00'}</td>
+      <td style="color:${r.settlement > 0 ? 'var(--success)' : '#888'}">${r.settlement > 0 ? fmt(r.settlement) : '.00'}</td>
+      <td style="color:${netColor}; font-weight:600">${fmt(Math.abs(net))}</td>
+    </tr>`;
+    } else {
+      return `
+    <tr>
+      <td>${i + 1}</td>
+      <td>${fmtDate(r.date)}</td>
+      <td></td>
+      <td style="color:${r.custody > 0 ? 'var(--danger)' : '#888'}">${r.custody > 0 ? fmt(r.custody) : '.00'}</td>
+      <td style="color:${r.settlement > 0 ? 'var(--success)' : '#888'}">${r.settlement > 0 ? fmt(r.settlement) : '.00'}</td>
+      <td style="color:${r._balance >= 0 ? 'var(--success)' : 'var(--danger)'}; font-weight:600">${fmt(r._balance)}</td>
+    </tr>`;
+    }
+  }).join('');
 
   const balLabel = finalBal >= 0 ? 'تسويه' : 'عهده';
   const balColor = finalBal >= 0 ? 'var(--success)' : 'var(--danger)';
@@ -289,8 +344,8 @@ function buildReport() {
       <thead>
         <tr>
           <th style="width:28px">م</th>
-          <th style="width:80px">التـاريخ</th>
-          <th>تفاصيل</th>
+          <th style="width:90px">التـاريخ</th>
+          <th style="width:90px">الموقع</th>
           <th style="width:76px">عهده</th>
           <th style="width:76px">تسويه</th>
           <th style="width:76px">الرصيد</th>
@@ -369,163 +424,341 @@ async function doExportPDF() {
    ================================================================ */
 async function doExportExcel() {
   if (!reportEntries || !reportEntries.length) return;
-  const inf     = DB.account;
-  const tc      = reportEntries.reduce((s,e) => s + e.custody,    0);
-  const ts      = reportEntries.reduce((s,e) => s + e.settlement, 0);
-  const finalBal = reportEntries[reportEntries.length - 1]._balance;
+  const inf = DB.account;
 
-  const wb = new ExcelJS.Workbook();
-  const ws = wb.addWorksheet('التقرير', { views: [{ rightToLeft: true }] });
+  // ── Column letter helper (1-based, single letter, max 26 cols) ────────
+  const colL = (n) => String.fromCharCode(64 + n);
 
-  ws.columns = [
-    { width: 6  },   // A: م
-    { width: 16 },   // B: التاريخ
-    { width: 42 },   // C: التفاصيل
-    { width: 16 },   // D: عهده
-    { width: 16 },   // E: تسوية
-    { width: 16 },   // F: الرصيد
+  // ── Detect which categories are actually used in this report ──────────
+  const ALL_CATS = ['أنتقالات', 'إكراميات', 'نقل', 'عماله', 'إقامة', 'أخري'];
+  const usedSet  = new Set(
+    reportEntries
+      .filter(e => e.settlement > 0 && e.category)
+      .map(e => ALL_CATS.includes(e.category) ? e.category : 'أخري')
+  );
+  const usedCats = ALL_CATS.filter(c => usedSet.has(c));
+  if (usedCats.length === 0) usedCats.push('أخري'); // always at least one col
+
+  // Column layout (1-based):
+  //  A=1 (م)  B=2 (التاريخ)  C=3 (اسم الموقع)  D=4 (البيان)
+  //  5 .. 4+usedCats.length : dynamic expense categories
+  //  5+usedCats.length      : العهدة  (custody)
+  //  6+usedCats.length      : الفرق   (difference)
+  const catStartCol = 5;
+  const colCustody  = catStartCol + usedCats.length;
+  const colFarq     = catStartCol + usedCats.length + 1;
+  const totalCols   = colFarq;
+  const lastCol     = colL(totalCols);
+
+  // Map category name → 1-based column number
+  const catColIdx = {};
+  usedCats.forEach((c, i) => catColIdx[c] = catStartCol + i);
+
+  // ── Group entries by siteId ───────────────────────────────────────────
+  const siteMap   = {};
+  const siteOrder = [];
+  const noSiteRows = [];
+
+  reportEntries.forEach(e => {
+    if (e.siteId) {
+      if (!siteMap[e.siteId]) {
+        siteMap[e.siteId] = { custody: 0, catAmts: {}, minDate: e.date, maxDate: e.date };
+        usedCats.forEach(c => siteMap[e.siteId].catAmts[c] = 0);
+        siteOrder.push(e.siteId);
+      }
+      const g = siteMap[e.siteId];
+      if (e.custody    > 0) g.custody += e.custody;
+      if (e.settlement > 0) {
+        const cat = ALL_CATS.includes(e.category) ? e.category : 'أخري';
+        if (g.catAmts.hasOwnProperty(cat))
+          g.catAmts[cat] = parseFloat((g.catAmts[cat] + e.settlement).toFixed(2));
+      }
+      if (e.date < g.minDate) g.minDate = e.date;
+      if (e.date > g.maxDate) g.maxDate = e.date;
+    } else {
+      noSiteRows.push(e);
+    }
+  });
+
+  const displayRows = [
+    ...siteOrder.map((sid, i) => ({ type: 'group', rowNum: i + 1, siteId: sid, ...siteMap[sid] })),
+    ...noSiteRows.map((e, i) => ({ type: 'single', rowNum: siteOrder.length + i + 1, ...e })),
   ];
 
-  // --- Embed logo (cols D-F = left side in RTL) ---
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('كشف تسوية', { views: [{ rightToLeft: true }] });
+
+  // Dynamic column widths
+  ws.columns = [
+    { width: 6  },  // A: م
+    { width: 20 },  // B: التاريخ
+    { width: 18 },  // C: اسم الموقع
+    { width: 28 },  // D: البيان
+    ...usedCats.map(() => ({ width: 14 })), // dynamic expense cols
+    { width: 18 },  // العهدة
+    { width: 18 },  // الفرق
+  ];
+
+  const bdr       = (s, argb) => ({ top:{style:s,color:{argb}}, bottom:{style:s,color:{argb}}, left:{style:s,color:{argb}}, right:{style:s,color:{argb}} });
+  const blueFill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1565C0' } };
+  const blue2Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E88E5' } };
+  const grayFill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFECEFF1' } };
+
+  // ── LOGO (left side in RTL = high column indices) ────────────────────
+  const logoStart0 = Math.max(colCustody - 2, 4); // 0-based
   const imgId = wb.addImage({ base64: LOGO_SRC.split(',')[1], extension: 'jpeg' });
-  ws.addImage(imgId, { tl: { col: 3, row: 0 }, br: { col: 6, row: 4 } });
+  ws.addImage(imgId, { tl: { col: logoStart0, row: 0 }, br: { col: totalCols, row: 3 } });
 
-  // --- Account info (cols A-C = right side in RTL) ---
-  const dateNow = new Date().toLocaleDateString('ar-EG');
+  // ── HEADER rows 1-2: right side in RTL = cols A-D ───────────────────
+  const now = new Date();
+  const reportDate = String(now.getDate()).padStart(2,'0') + '/' +
+                     String(now.getMonth()+1).padStart(2,'0') + '/' +
+                     now.getFullYear();
 
-  ws.getRow(1).height = 22;
-  ws.mergeCells('A1:C1');
-  const r1 = ws.getCell('A1');
-  r1.value = 'LMP PettyCash Tracker';
-  r1.font  = { name: 'Arial', size: 13, bold: true, color: { argb: 'FF0B3D26' } };
-  r1.alignment = { horizontal: 'right', vertical: 'middle' };
+  ws.getRow(1).height = 24;
+  ws.mergeCells('A1:D1');
+  const h1 = ws.getCell('A1');
+  h1.value = 'اسم أمين العهدة :  ' + (inf.name || '.....................');
+  h1.font = { name: 'Arial', size: 12, bold: true };
+  h1.alignment = { horizontal: 'right', vertical: 'middle' };
 
-  ws.getRow(2).height = 20;
-  ws.mergeCells('A2:C2');
-  const r2 = ws.getCell('A2');
-  r2.value = 'الاسم: ' + (inf.name || '-');
-  r2.font  = { name: 'Arial', size: 11 };
-  r2.alignment = { horizontal: 'right', vertical: 'middle' };
+  ws.getRow(2).height = 22;
+  ws.mergeCells('A2:D2');
+  const h2 = ws.getCell('A2');
+  h2.value = 'تاريخ الكشف :  ' + reportDate;
+  h2.font = { name: 'Arial', size: 12, bold: true };
+  h2.alignment = { horizontal: 'right', vertical: 'middle' };
 
-  ws.getRow(3).height = 20;
-  ws.mergeCells('A3:C3');
-  const r3 = ws.getCell('A3');
-  r3.value = 'رقم الهاتف: ' + (inf.number || '-');
-  r3.font  = { name: 'Arial', size: 11 };
-  r3.alignment = { horizontal: 'right', vertical: 'middle' };
+  ws.getRow(3).height = 14;
 
-  ws.getRow(4).height = 20;
-  ws.mergeCells('A4:C4');
-  const r4 = ws.getCell('A4');
-  r4.value = 'تاريخ التقرير: ' + dateNow;
-  r4.font  = { name: 'Arial', size: 11 };
-  r4.alignment = { horizontal: 'right', vertical: 'middle' };
+  // ── TITLE (row 4) ────────────────────────────────────────────────────
+  ws.getRow(4).height = 30;
+  ws.mergeCells('A4:' + lastCol + '4');
+  const titleCell = ws.getCell('A4');
+  titleCell.value = 'كشف تسوية عهدة';
+  titleCell.font = { name: 'Arial', size: 16, bold: true };
+  titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
 
-  // --- Spacer row 5 ---
-  ws.getRow(5).height = 8;
+  // ── TABLE HEADER rows 5-6 ────────────────────────────────────────────
+  ws.getRow(5).height = 24;
+  ws.getRow(6).height = 22;
 
-  // --- Column headers (row 6) ---
-  ws.getRow(6).height = 24;
-  ['م', 'التاريخ', 'التفاصيل', 'عهده', 'تسوية', 'الرصيد'].forEach((h, i) => {
-    const cell = ws.getCell(6, i + 1);
-    cell.value = h;
-    cell.font  = { name: 'Arial', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
-    cell.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1565C0' } };
+  // Fixed cols A-D and العهدة and الفرق span rows 5-6
+  const spanCols = [
+    [1, 'م'], [2, 'التاريخ'], [3, 'اسم الموقع'], [4, 'البيان'],
+    [colCustody, 'العهدة'], [colFarq, 'الفرق'],
+  ];
+  spanCols.forEach(([col, val]) => {
+    const addr = colL(col) + '5';
+    ws.mergeCells(addr + ':' + colL(col) + '6');
+    const c = ws.getCell(addr);
+    c.value = val;
+    c.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
+    c.fill = blueFill;
+    c.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+    c.border = bdr('thin', 'FFFFFFFF');
+  });
+
+  // المصروفات merged header spans used category cols (row 5 only)
+  const expEndCol = colL(catStartCol - 1 + usedCats.length);
+  ws.mergeCells('E5:' + expEndCol + '5');
+  const hdrExp = ws.getCell('E5');
+  hdrExp.value = 'المصروفات';
+  hdrExp.font = { name: 'Arial', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
+  hdrExp.fill = blueFill;
+  hdrExp.alignment = { horizontal: 'center', vertical: 'middle' };
+  hdrExp.border = bdr('thin', 'FFFFFFFF');
+
+  // Category sub-headers (row 6)
+  usedCats.forEach((cat, i) => {
+    const cell = ws.getCell(6, catStartCol + i);
+    cell.value = cat;
+    cell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
+    cell.fill = blue2Fill;
     cell.alignment = { horizontal: 'center', vertical: 'middle' };
-    cell.border = {
-      top:    { style: 'thin', color: { argb: 'FFFFFFFF' } },
-      bottom: { style: 'thin', color: { argb: 'FFFFFFFF' } },
-      left:   { style: 'thin', color: { argb: 'FFFFFFFF' } },
-      right:  { style: 'thin', color: { argb: 'FFFFFFFF' } },
-    };
+    cell.border = bdr('thin', 'FFFFFFFF');
   });
 
-  // --- Data rows (starting row 7) ---
-  const thin = (argb) => ({ style: 'thin', color: { argb } });
-  reportEntries.forEach((e, i) => {
+  // ── DATA ROWS (starting row 7) ───────────────────────────────────────
+  const catTotals   = {};
+  usedCats.forEach(c => catTotals[c] = 0);
+  let grandCustody  = 0;
+  let grandFarqSum  = 0;
+
+  displayRows.forEach((r, i) => {
     const rn = 7 + i;
-    const bg = i % 2 === 0 ? 'FFFFFFFF' : 'FFF5F5F5';
-    const rowVals = [
-      i + 1,
-      fmtDate(e.date),
-      e.details,
-      e.custody    > 0 ? e.custody    : null,
-      e.settlement > 0 ? e.settlement : null,
-      e._balance,
-    ];
-    rowVals.forEach((v, ci) => {
-      const cell = ws.getCell(rn, ci + 1);
-      cell.value = v;
-      cell.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: bg } };
-      cell.alignment = { horizontal: ci === 2 ? 'right' : 'center', vertical: 'middle' };
-      cell.border = { top: thin('FFD0D0D0'), bottom: thin('FFD0D0D0'), left: thin('FFD0D0D0'), right: thin('FFD0D0D0') };
-      let fc = 'FF333333', bold = false;
-      if (ci === 3 && e.custody    > 0) { fc = 'FFC62828'; bold = true; }
-      if (ci === 4 && e.settlement > 0) { fc = 'FF2E7D32'; bold = true; }
-      if (ci === 5) { fc = e._balance < 0 ? 'FFC62828' : 'FF2E7D32'; bold = true; }
-      cell.font = { name: 'Arial', size: 10, bold, color: { argb: fc } };
-    });
     ws.getRow(rn).height = 20;
+    const bg = i % 2 === 0 ? 'FFFFFFFF' : 'FFF3F8FF';
+
+    // Paint entire row first
+    for (let ci = 1; ci <= totalCols; ci++) {
+      const cell = ws.getCell(rn, ci);
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bg } };
+      cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      cell.border = bdr('thin', 'FFD0D0D0');
+      cell.font = { name: 'Arial', size: 10, color: { argb: 'FF333333' } };
+    }
+
+    if (r.type === 'group') {
+      const totalSett = parseFloat(
+        usedCats.reduce((s, c) => s + (r.catAmts[c] || 0), 0).toFixed(2)
+      );
+      const farq = parseFloat((r.custody - totalSett).toFixed(2));
+      const dateStr = r.minDate === r.maxDate
+        ? fmtDate(r.minDate)
+        : fmtDate(r.minDate) + ' \u2013 ' + fmtDate(r.maxDate);
+
+      ws.getCell(rn, 1).value = r.rowNum;
+      ws.getCell(rn, 2).value = dateStr;
+      const scell = ws.getCell(rn, 3);
+      scell.value = r.siteId;
+      scell.font  = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF333333' } };
+
+      // Category amounts
+      usedCats.forEach(c => {
+        const v = r.catAmts[c] || 0;
+        if (v > 0) {
+          const cell = ws.getCell(rn, catColIdx[c]);
+          cell.value = v;
+          cell.font  = { name: 'Arial', size: 10, bold: true, color: { argb: 'FFC62828' } };
+          catTotals[c] = parseFloat((catTotals[c] + v).toFixed(2));
+        }
+      });
+
+      // العهدة
+      if (r.custody > 0) {
+        const cc = ws.getCell(rn, colCustody);
+        cc.value = r.custody;
+        cc.font  = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF1565C0' } };
+        grandCustody = parseFloat((grandCustody + r.custody).toFixed(2));
+      }
+
+      // الفرق
+      const fc = ws.getCell(rn, colFarq);
+      fc.value = farq;
+      fc.font  = { name: 'Arial', size: 10, bold: true,
+                   color: { argb: farq >= 0 ? 'FF2E7D32' : 'FFC62828' } };
+      grandFarqSum = parseFloat((grandFarqSum + farq).toFixed(2));
+
+    } else {
+      // Individual entry (no siteId) — show as-is
+      ws.getCell(rn, 1).value = r.rowNum;
+      ws.getCell(rn, 2).value = fmtDate(r.date);
+      const dc = ws.getCell(rn, 4);
+      dc.value = r.details;
+      dc.alignment = { horizontal: 'right', vertical: 'middle' };
+
+      if (r.settlement > 0 && r.category) {
+        const cat = ALL_CATS.includes(r.category) ? r.category : 'أخري';
+        if (catColIdx[cat]) {
+          const cell = ws.getCell(rn, catColIdx[cat]);
+          cell.value = r.settlement;
+          cell.font  = { name: 'Arial', size: 10, bold: true, color: { argb: 'FFC62828' } };
+          catTotals[cat] = parseFloat((catTotals[cat] + r.settlement).toFixed(2));
+        }
+      } else if (r.custody > 0) {
+        const cc = ws.getCell(rn, colCustody);
+        cc.value = r.custody;
+        cc.font  = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF1565C0' } };
+        grandCustody = parseFloat((grandCustody + r.custody).toFixed(2));
+      }
+    }
   });
 
-  const afterData = 7 + reportEntries.length;
+  const afterData = 7 + displayRows.length;
 
-  // --- Spacer ---
-  ws.getRow(afterData).height = 8;
+  // ── المجموع ROW ──────────────────────────────────────────────────────
+  const sumR = afterData;
+  ws.getRow(sumR).height = 22;
+  ws.mergeCells('A' + sumR + ':D' + sumR);
+  const sumLbl = ws.getCell('A' + sumR);
+  sumLbl.value = 'المجموع';
+  sumLbl.font  = { name: 'Arial', size: 11, bold: true };
+  sumLbl.fill  = grayFill;
+  sumLbl.alignment = { horizontal: 'center', vertical: 'middle' };
+  sumLbl.border    = bdr('medium', 'FF9E9E9E');
 
-  // --- Totals row ---
-  const totR = afterData + 1;
-  ws.getRow(totR).height = 22;
-  ws.mergeCells('A' + totR + ':C' + totR);
-
-  const mBdr = (argb) => ({ style: 'medium', color: { argb } });
-  const sBdr = (argb) => ({ style: 'thin',   color: { argb } });
-  const grayFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFECEFF1' } };
-
-  const totLabel = ws.getCell('A' + totR);
-  totLabel.value = 'إجمالي العمليات';
-  totLabel.font  = { name: 'Arial', size: 11, bold: true };
-  totLabel.fill  = grayFill;
-  totLabel.alignment = { horizontal: 'center', vertical: 'middle' };
-  totLabel.border = { top: mBdr('FF9E9E9E'), bottom: mBdr('FF9E9E9E'), left: mBdr('FF9E9E9E'), right: mBdr('FF9E9E9E') };
-
-  [[4, tc, 'FFC62828'], [5, ts, 'FF2E7D32'], [6, null, 'FF333333']].forEach(function(arr) {
-    const col = arr[0], val = arr[1], fc = arr[2];
-    const c = ws.getCell(totR, col);
-    c.value = val || null;
-    c.font  = { name: 'Arial', size: 11, bold: true, color: { argb: fc } };
-    c.fill  = grayFill;
-    c.alignment = { horizontal: 'center', vertical: 'middle' };
-    c.border = { top: mBdr('FF9E9E9E'), bottom: mBdr('FF9E9E9E'), left: sBdr('FF9E9E9E'), right: sBdr('FF9E9E9E') };
+  usedCats.forEach(c => {
+    const cell = ws.getCell(sumR, catColIdx[c]);
+    cell.value = catTotals[c] > 0 ? catTotals[c] : null;
+    cell.font  = { name: 'Arial', size: 11, bold: true, color: { argb: 'FFC62828' } };
+    cell.fill  = grayFill;
+    cell.alignment = { horizontal: 'center', vertical: 'middle' };
+    cell.border    = bdr('medium', 'FF9E9E9E');
   });
 
-  // --- Balance footer ---
-  const balR = totR + 2;
-  ws.getRow(balR).height = 24;
-  ws.mergeCells('A' + balR + ':F' + balR);
-  const balCell = ws.getCell('A' + balR);
-  const balAbs  = Math.abs(finalBal);
-  balCell.value = 'الرصيد الحالي: ' + fmt(balAbs) + ' ج.م  \u2014  ' + toArabicWords(balAbs) + ' جنيه';
-  balCell.font  = { name: 'Arial', size: 12, bold: true, color: { argb: finalBal < 0 ? 'FFC62828' : 'FF1565C0' } };
-  balCell.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0F4FF' } };
-  balCell.alignment = { horizontal: 'center', vertical: 'middle' };
-  balCell.border = { top: mBdr('FF1565C0'), bottom: mBdr('FF1565C0'), left: mBdr('FF1565C0'), right: mBdr('FF1565C0') };
+  const sumCust = ws.getCell(sumR, colCustody);
+  sumCust.value = grandCustody > 0 ? grandCustody : null;
+  sumCust.font  = { name: 'Arial', size: 11, bold: true, color: { argb: 'FF1565C0' } };
+  sumCust.fill  = grayFill;
+  sumCust.alignment = { horizontal: 'center', vertical: 'middle' };
+  sumCust.border    = bdr('medium', 'FF9E9E9E');
 
-  // --- Credit line ---
-  const credR = balR + 2;
-  ws.mergeCells('A' + credR + ':F' + credR);
-  const credCell = ws.getCell('A' + credR);
-  credCell.value = 'LMP PettyCash Tracker';
-  credCell.font  = { name: 'Arial', size: 9, italic: true, color: { argb: 'FF9E9E9E' } };
-  credCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  const sumFarq = ws.getCell(sumR, colFarq);
+  sumFarq.value = grandFarqSum;
+  sumFarq.font  = { name: 'Arial', size: 11, bold: true,
+                    color: { argb: grandFarqSum >= 0 ? 'FF2E7D32' : 'FFC62828' } };
+  sumFarq.fill  = grayFill;
+  sumFarq.alignment = { horizontal: 'center', vertical: 'middle' };
+  sumFarq.border    = bdr('medium', 'FF9E9E9E');
 
-  // --- Download ---
+  // ── الأجمالي ROW — PDF-style balance text ────────────────────────────
+  // Grand difference = total custody of ALL entries − total settlement of ALL entries
+  const grandTotalCust = parseFloat(reportEntries.reduce((s,e) => s + e.custody,    0).toFixed(2));
+  const grandTotalSett = parseFloat(reportEntries.reduce((s,e) => s + e.settlement, 0).toFixed(2));
+  const grandDiff  = parseFloat((grandTotalCust - grandTotalSett).toFixed(2));
+  const diffAbs    = Math.abs(grandDiff);
+  const diffLabel  = grandDiff >= 0 ? 'عهده' : 'تسويه';
+  const diffArgb   = grandDiff >= 0 ? 'FFC62828' : 'FF2E7D32';
+
+  const totR = sumR + 1;
+  ws.getRow(totR).height = 28;
+  ws.mergeCells('A' + totR + ':' + lastCol + totR);
+  const totCell = ws.getCell('A' + totR);
+  totCell.value = 'الرصيد الحالي :  ' + diffLabel + '  ' + fmt(diffAbs) +
+                  ' ج.م  \u2014  ' + toArabicWords(diffAbs) + ' جنيه مصري';
+  totCell.font  = { name: 'Arial', size: 12, bold: true, color: { argb: diffArgb } };
+  totCell.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0F4FF' } };
+  totCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  totCell.border    = bdr('medium', 'FF1565C0');
+
+  // ── SIGNATURE LINES ───────────────────────────────────────────────────
+  const sigLblR  = totR + 2;
+  const sigLineR = totR + 4;
+  ws.getRow(sigLblR).height  = 20;
+  ws.getRow(sigLineR).height = 16;
+
+  const midC = Math.ceil(totalCols / 2);
+  const sigs = [
+    { s: 1,      e: 2,      label: 'أمين العهدة' },
+    { s: midC-1, e: midC+1, label: 'المدير المسئول' },
+    { s: totalCols-1, e: totalCols-1, label: 'الحسابات' },
+    { s: totalCols,   e: totalCols,   label: 'يعتمد' },
+  ];
+  sigs.forEach(sig => {
+    const s = Math.max(1, Math.min(sig.s, totalCols));
+    const e = Math.max(1, Math.min(sig.e, totalCols));
+    if (s !== e) {
+      ws.mergeCells(colL(s) + sigLblR  + ':' + colL(e) + sigLblR);
+      ws.mergeCells(colL(s) + sigLineR + ':' + colL(e) + sigLineR);
+    }
+    const lbl  = ws.getCell(colL(s) + sigLblR);
+    lbl.value  = sig.label;
+    lbl.font   = { name: 'Arial', size: 11, bold: true };
+    lbl.alignment = { horizontal: 'center', vertical: 'middle' };
+    const line = ws.getCell(colL(s) + sigLineR);
+    line.value = '____________________';
+    line.font  = { name: 'Arial', size: 10, color: { argb: 'FF9E9E9E' } };
+    line.alignment = { horizontal: 'center', vertical: 'middle' };
+  });
+
+  // ── DOWNLOAD ──────────────────────────────────────────────────────────
   const buf  = await wb.xlsx.writeBuffer();
   const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   const url  = URL.createObjectURL(blob);
   const a    = document.createElement('a');
   a.href     = url;
-  a.download = 'تقرير_العهدة_' + (inf.name || 'حساب') + '_' + todayISO() + '.xlsx';
+  a.download = 'كشف_تسوية_عهدة_' + (inf.name || 'حساب') + '_' + todayISO() + '.xlsx';
   a.click();
   URL.revokeObjectURL(url);
   toast('تم تحميل Excel \u2713', 'success');

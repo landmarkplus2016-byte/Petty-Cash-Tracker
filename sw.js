@@ -1,4 +1,4 @@
-const CACHE = 'lmp-petty-cash-v1.10';
+const CACHE = 'lmp-petty-cash-v1.15';
 const ASSETS = [
   './',
   './index.html',
