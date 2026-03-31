@@ -149,14 +149,36 @@
     <!-- Category -->
     <div class="mb-3">
       <label class="form-label fw-semibold small">الفئة</label>
-      <select class="form-select" id="eCategory">
+      <select class="form-select" id="eCategory" onchange="onCategoryChange()">
         <option value="">-- اختر الفئة --</option>
-        <option value="أنتقالات">أنتقالات</option>
-        <option value="إكراميات">إكراميات</option>
-        <option value="نقل">نقل</option>
-        <option value="عماله">عماله</option>
-        <option value="إقامة">إقامة</option>
+        <option value="انتقالات">انتقالات</option>
+        <option value="أكراميات">أكراميات</option>
+        <option value="أقامة">أقامة</option>
         <option value="أخري">أخري</option>
+      </select>
+    </div>
+
+    <!-- Sub-Category (shown only when أخري is selected) -->
+    <div class="mb-3" id="eSubCategoryDiv" style="display:none">
+      <label class="form-label fw-semibold small">التصنيف الفرعي</label>
+      <select class="form-select" id="eSubCategory">
+        <option value="">-- اختر التصنيف الفرعي --</option>
+        <option value="رسوم التبرع">رسوم التبرع</option>
+        <option value="رسوم البيئة">رسوم البيئة</option>
+        <option value="رسوم الزراعة">رسوم الزراعة</option>
+        <option value="رسوم الطيران المدني">رسوم الطيران المدني</option>
+        <option value="رسوم بدلات الطيران المدني">رسوم بدلات الطيران المدني</option>
+        <option value="رسوم المعاينة المبدئية">رسوم المعاينة المبدئية</option>
+        <option value="رسوم المقايسة">رسوم المقايسة</option>
+        <option value="رسوم تأمين العداد">رسوم تأمين العداد</option>
+        <option value="رسوم شحن العداد">رسوم شحن العداد</option>
+        <option value="رسوم متوسط الاستهلاك">رسوم متوسط الاستهلاك</option>
+        <option value="رسوم ترخيص إدارة التفتيش والمتابعة-وزارة الدفاع">رسوم ترخيص إدارة التفتيش والمتابعة-وزارة الدفاع</option>
+        <option value="رسوم ترخيص السور - إدارة التفتيش والمتابعة بوزارة الدفاع">رسوم ترخيص السور - إدارة التفتيش والمتابعة بوزارة الدفاع</option>
+        <option value="اكراميات الترخيص">اكراميات الترخيص</option>
+        <option value="اكراميات الكهرباء">اكراميات الكهرباء</option>
+        <option value="تأمين الموقع">تأمين الموقع</option>
+        <option value="غفرة الموقع">غفرة الموقع</option>
       </select>
     </div>
 

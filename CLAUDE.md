@@ -37,7 +37,7 @@ All data lives in `localStorage` under key `sa_pettycash_v1`:
 ```js
 DB = {
   account: { name, number },   // only 2 fields
-  entries: [{ id, date, details, siteId, category, custody, settlement, _balance }],
+  entries: [{ id, date, details, siteId, category, subCategory, custody, settlement, _balance }],
   seq: 1   // auto-increment id counter
 }
 ```
@@ -47,9 +47,31 @@ DB = {
 - عهده (custody) = money OUT → negative, shown in red (`--danger`)
 - تسوية (settlement) = money IN → positive, shown in green (`--success`)
 
-**New entry fields (added):**
+**Entry fields:**
 - `siteId` — free-text site identifier (e.g. `D1234`). Optional but used for grouping in reports.
-- `category` — single-select from fixed list matching the Excel expense columns: `أنتقالات | إكراميات | نقل | عماله | إقامة | أخري`. Required on save. Determines which expense column the amount appears in on the Excel export.
+- `category` — single-select from fixed list: `انتقالات | أكراميات | أقامة | أخري`. Required on save. Determines which expense column the amount appears in on the Excel export.
+- `subCategory` — required only when `category === 'أخري'`. Selected from a fixed list of 16 government-fee/permit items (see below). Stored as empty string `''` for all other categories.
+
+**Backward-compat note:** Old entries may have category values from the previous list (`أنتقالات`, `إكراميات`, `نقل`, `عماله`, `إقامة`). The Excel export normalises these via `CAT_NORM` mapping: `أنتقالات→انتقالات`, `إكراميات→أكراميات`, `إقامة→أقامة`, `نقل→أخري`, `عماله→أخري`.
+
+### Category & SubCategory System
+
+**Main categories** (`#eCategory`):
+```
+انتقالات | أكراميات | أقامة | أخري
+```
+
+**SubCategory** (`#eSubCategoryDiv` / `#eSubCategory`) — visible only when أخري is selected (`onCategoryChange()`):
+```
+رسوم التبرع | رسوم البيئة | رسوم الزراعة | رسوم الطيران المدني |
+رسوم بدلات الطيران المدني | رسوم المعاينة المبدئية | رسوم المقايسة |
+رسوم تأمين العداد | رسوم شحن العداد | رسوم متوسط الاستهلاك |
+رسوم ترخيص إدارة التفتيش والمتابعة-وزارة الدفاع |
+رسوم ترخيص السور - إدارة التفتيش والمتابعة بوزارة الدفاع |
+اكراميات الترخيص | اكراميات الكهرباء | تأمين الموقع | غفرة الموقع
+```
+
+`saveEntry()` validates that subCategory is chosen when category is أخري. `editEntry(id)` shows/hides `#eSubCategoryDiv` and populates `#eSubCategory`. `resetAddForm()` clears it and hides the div.
 
 ### Page Navigation (SPA)
 Pages are `<div class="page">` elements toggled with `.active`. Navigate with `goPage(name)` where name is one of: `dashboard`, `add`, `records`, `report`, `settings`. Each page has a corresponding render function called inside `goPage()`.
@@ -73,24 +95,32 @@ Both the banner and blue ribbon are wrapped in `<div id="sticky-top">` with `pos
 #### PDF report — `buildReport()` + `doExportPDF()`
 - `buildReport()` generates a `#reportContent` div with inline styles. The table is wrapped in `overflow-x:auto` for in-app scrolling.
 - `doExportPDF()` — temporarily sets `el.style.minWidth = '700px'` before calling `html2canvas` so all columns render fully, then restores. Embeds canvas as image in jsPDF.
-- **PDF groups entries by `siteId`** — one row per site showing: م | التاريخ | الموقع | عهده | تسويه | الرصيد. The الرصيد per group = custody − settlements (outstanding per site). Entries with no `siteId` appear individually below the grouped rows. الفئة and تفاصيل columns are **not** shown in the PDF.
 - `reportEntries` (set inside `buildReport()`) holds the flat un-grouped individual entries — used by `doExportExcel()` which does its own grouping independently.
 
-#### Excel export — `doExportExcel()`
-The Excel is a **"كشف تسوية عهدة"** form matching the company's physical settlement sheet. Key behaviours:
+**PDF table columns:** م | التاريخ | اسم الموقع | البيان | المصروفات | العهدة | الفرق
 
-- **Dynamic category columns** — scans `reportEntries` for which of the 6 categories (`أنتقالات | إكراميات | نقل | عماله | إقامة | أخري`) are actually used. Only those columns are generated. Column count = 4 fixed + N used categories + 2 (العهدة + الفرق).
-- **Column layout** (1-based, single-letter A-Z, max 12 cols):
+**PDF grouping logic** — entries are grouped by **(siteId + البيان)** key before rendering:
+- `البيان` = `subCategory` if set, otherwise `details`
+- When the same site has both a custody entry AND a settlement entry with the same البيان, they merge into **one row** — custody and settlement are summed, الفرق = custody − settlement
+- Entries with no `siteId` are never grouped; they appear individually below the site rows
+- The date shown for a merged group is the **latest** date among the merged entries
+- Total row at bottom shows sums of المصروفات and العهدة columns
+
+#### Excel export — `doExportExcel()`
+The Excel is a **"كشف تسوية عهدة"** form. Key behaviours:
+
+- **Dynamic category columns** — scans `reportEntries` for which of the 4 categories are actually used. Only those columns are generated.
+- **Column layout** (1-based, single-letter A-Z):
   - A: م  B: التاريخ  C: اسم الموقع  D: البيان
-  - E … (4+N): dynamic expense category columns
-  - (5+N): العهدة — numeric custody amount (blue)
-  - (6+N): الفرق — custody − total settlements per site (green/red)
-- **Grouped by siteId** — same logic as PDF: one row per site. Entries without a siteId appear individually. `colL(n)` helper converts 1-based column number → letter (`String.fromCharCode(64+n)`).
+  - E … (4+N): dynamic expense category columns (انتقالات / أكراميات / أقامة / أخري)
+  - No العهدة column. No الفرق column.
+- **البيان column** — for grouped site rows shows the first entry's subCategory or details; for individual rows shows subCategory (if أخري) else details.
+- **Grouped by siteId** — one row per site, aggregating custody and catAmts. Entries without a siteId appear individually. `colL(n)` helper converts 1-based column number → letter.
 - **Header**: `اسم أمين العهدة` pulls from `DB.account.name`; `تاريخ الكشف` is today's date at export time (`DD/MM/YYYY`).
-- **المجموع row** — per-column totals for every expense col + العهدة + الفرق.
-- **الأجمالي row** — full-width PDF-style balance text: `الرصيد الحالي : عهده/تسوية [amount] ج.م — [Arabic words] جنيه مصري`. The sign is based on grand total custody − grand total settlement across all `reportEntries`.
-- **No "لا غير" row** — removed.
-- Logo is placed at `tl: { col: logoStart0, row: 0 }` where `logoStart0 = max(colCustody-2, 4)` (0-based), so it always sits in the left portion of the sheet regardless of column count.
+- **المجموع row** — per-column totals for every expense category column.
+- **الإجمالي الكلي row** — directly below المجموع. Label (A–D merged) + single merged value (E–lastCol) = sum of ALL category column totals. Styled in dark blue with white bold text.
+- **No الرصيد الحالي row** — removed.
+- Logo is placed at `tl: { col: logoStart0, row: 0 }` where `logoStart0 = max(totalCols-2, 4)` (0-based).
 - Downloads via `wb.xlsx.writeBuffer()` → Blob → `URL.createObjectURL`.
 
 ### Favicon
@@ -111,11 +141,12 @@ The form (`#page-add`) now has these fields in order:
 1. نوع العملية — radio toggle: عهدة (custody) / تسوية (settlement)
 2. التاريخ — `<input type="date" id="eDate">`
 3. رقم الموقع — `<input type="text" id="eSiteId">` (optional, used for report grouping)
-4. الفئة — `<select id="eCategory">` single-select, required. Options: أنتقالات / إكراميات / نقل / عماله / إقامة / أخري
-5. التفاصيل — `<textarea id="eDetails">` with mic button
-6. المبلغ — `<input type="number" id="eAmount">` with mic button
+4. الفئة — `<select id="eCategory" onchange="onCategoryChange()">` single-select, required. Options: انتقالات / أكراميات / أقامة / أخري
+5. التصنيف الفرعي — `<select id="eSubCategory">` inside `<div id="eSubCategoryDiv">`. Hidden unless أخري is selected. Required when visible.
+6. التفاصيل — `<textarea id="eDetails">` with mic button
+7. المبلغ — `<input type="number" id="eAmount">` with mic button
 
-`saveEntry()` validates date, details, category (required), and amount > 0. `resetAddForm()` clears all six fields. `editEntry(id)` populates `eSiteId` and `eCategory` in addition to the original fields.
+`saveEntry()` validates date, details, category, subCategory (when أخري), and amount > 0. `resetAddForm()` clears all fields including subCategory and hides `#eSubCategoryDiv`. `editEntry(id)` populates all fields and shows/hides `#eSubCategoryDiv` based on category.
 
 ### Edit Entry Pattern
 **Critical**: in `editEntry(id)`, call `goPage('add')` FIRST (which triggers `resetAddForm()`), then populate the form fields. Reverse order causes the reset to wipe the populated values.
@@ -137,7 +168,7 @@ Added to the Add Entry form (`page-add`). Uses the browser's built-in **Web Spee
 ### PWA / Service Worker
 `sw.js` caches `index.html`, `app.js`, `styles.css`, `cashflow.png`, and `manifest.json` for offline use.
 
-**Critical — cache busting:** The `CACHE` constant in `sw.js` (e.g. `lmp-petty-cash-v1.15`) **must be incremented every time any file changes** before pushing to GitHub. The `activate` handler deletes all caches that don't match the current name, so bumping the version forces phones to download fresh files. Version sequence: `v1` → `v1.10` → `v1.11` → … → `v1.15` → ...
+**Critical — cache busting:** The `CACHE` constant in `sw.js` (e.g. `lmp-petty-cash-v1.18`) **must be incremented every time any file changes** before pushing to GitHub. The `activate` handler deletes all caches that don't match the current name, so bumping the version forces phones to download fresh files. Version sequence: `v1` → `v1.10` → `v1.11` → … → `v1.18` → ...
 
 ## Windows / PowerShell Environment
 
